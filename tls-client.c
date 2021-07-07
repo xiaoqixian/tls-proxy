@@ -750,6 +750,16 @@ void tcp_read_cb(struct bufferevent *bev, void *arg) {
         TCPArg *othrarg = NULL;
         bufferevent_getcb(thisarg->bev, NULL, NULL, NULL, (void **)&othrarg);
         bufferevent_disable(bev, EV_READ);
+        /*
+         * on input, a bufferevent will not invoke the user read callback unless there
+         * is at least low watermark of data in the buffer. When there is more than high
+         * watermark of data in the buffer, the bufferevent stops reading from the 
+         * network.
+         * on output, the user write callback is invoked whenever the bufferevent data 
+         * falls below the low watermark. Filters that write to this buffer will try not
+         * to write more bytes to this bufferevent than the high watermark, except when 
+         * flushing.
+         */
         bufferevent_setwatermark(thisarg->bev, EV_WRITE, BUFSIZ_FOR_BEV / 2, 0);
         bufferevent_setcb(thisarg->bev, tcp_read_cb, tcp_write_cb, tcp_events_cb, othrarg);
     }
