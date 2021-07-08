@@ -596,7 +596,7 @@ void tcp_newconn_cb(struct evconnlistener *listener, int sock, struct sockaddr *
     if (get_ssl_sess() != NULL) SSL_set_session(ssl, get_ssl_sess());
 
     struct bufferevent *clntbev = bufferevent_socket_new(evconnlistener_get_base(listener), sock, BEV_OPT_CLOSE_ON_FREE);                                       
-    struct bufferevent *destbev = bufferevent_openssl_socket_new(evconnlistener_get_base(listener), -1, ssl, BUFFEREVENT_SSL_CONNECTING, BEV_OPT_CLOSE_ON_FREE);
+    struct bufferevent *destbev = bufferevent_openssl_socket_new(evconnlistener_get_base(listener), -1, ssl, BUFFEREVENT_SSL_CONNECTING, BEV_OPT_CLOSE_ON_FREE); //in this function, if the socket fd parameter < 0, the function will learn the socket fd from the ssl object.
     
     TCPArg *clntarg = calloc(1, sizeof(TCPArg));
     strcpy(clntarg->addr, inet_ntoa(destaddr.sin_addr));
@@ -736,7 +736,7 @@ void tcp_recvres_cb(struct bufferevent *bev, void *arg) {
     bufferevent_setcb(bev, tcp_read_cb, NULL, tcp_events_cb, arg);
 
     TCPArg *othrarg = NULL; //if othrarg equals to NULL does not matter.
-    bufferevent_getcb(thisarg->bev, NULL, NULL, NULL, (void **)&othrarg); //do not think of othrarg as a pointer, think of it as a variable.
+    bufferevent_getcb(thisarg->bev, NULL, NULL, NULL, (void **)&othrarg); //do not think of othrarg as a pointer, think of it as a reference.
     bufferevent_setcb(thisarg->bev, tcp_read_cb, NULL, tcp_events_cb, othrarg); //after response, normal communcations start.
     bufferevent_enable(thisarg->bev, EV_READ);
 }
