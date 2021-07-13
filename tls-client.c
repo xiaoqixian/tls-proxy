@@ -431,8 +431,8 @@ int main(int argc, char *argv[]) {
         udpladdr.sin_addr.s_addr = inet_addr(listen);
         udpladdr.sin_port = htons(udport);
 
-        udprbuff = calloc(1, UDP_RAW_BUFSIZ);
-        udpebuff = calloc(1, UDP_ENC_BUFSIZ);
+        udprbuff = calloc(1, UDP_RAW_BUFSIZ); //raw buffer
+        udpebuff = calloc(1, UDP_ENC_BUFSIZ); //encode buffer
     }
 
     char ctime[36] = {0};
@@ -518,7 +518,7 @@ void *service(void *arg) {
         }
     }
 
-    if (arg != NULL) {
+    if (arg != (void*)0) {
         udplsock = socket(AF_INET, SOCK_DGRAM, 0);
         evutil_make_socket_nonblocking(udplsock);
 
@@ -538,7 +538,7 @@ void *service(void *arg) {
         }
 
         udptev = event_new(base, -1, EV_TIMEOUT, udp_release_cb, NULL);
-        udplev = event_new(base, udplsock, EV_READ | EV_PERSIST, udp_request_cb, NULL);
+        udplev = event_new(base, udplsock, EV_READ | EV_PERSIST, udp_request_cb, NULL); //with EV_PERSIST, whenever the socket fd is ready to read, the callback will be invoke. Without it, once the callback is invokded, you have to use event_add to get it back to the queue.
 
         SSL *ssl = SSL_new(ctx);
         SSL_set_tlsext_host_name(ssl, servhost);
@@ -889,6 +889,10 @@ void udp_recvres_cb(struct bufferevent *bev, void *arg) {
     bufferevent_setcb(bev, udp_response_cb, NULL, udp_sendreq_cb, NULL);
 }
 
+//calback invokded when the udp local socket is readable.
+//the parameter sock is udplsock.
+//receive data from udplsock and encode it in base64.
+//and transmit it to udpbev
 void udp_request_cb(int sock, short events, void *arg) {
     (void) sock; (void) events; (void) arg;
     memset(udpcntl, 0, sizeof(udpcntl));
@@ -953,6 +957,9 @@ void udp_request_cb(int sock, short events, void *arg) {
     printf("%s [udp] send %d bytes data to %s\n", loginf(ctime), rawlen, raddrstr);
 }
 
+//receive data from udpbev
+//decode it to raw data.
+//
 void udp_response_cb(struct bufferevent *bev, void *arg) {
     (void) bev; (void) arg;
     char ctime[36] = {0};

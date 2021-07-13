@@ -179,3 +179,60 @@ TCP连接的部分就暂时分析到这里，有问题的话可以在评论去�
 
 #### UDP connections
 
+同样从 `service` 函数开始看起，首先创建了一个socket `udplsock`. 这个socket绑定的是本地地址和本地监听的udp端口。说明udp与本地程序通信的方式都是通过socket管道进行数据交换。
+
+接着创建了两个event, 一个是超时后释放udp相关资源 `udptev`，另一个是当 `udplsock` 可读时唤醒 `udp_request_cb`的  `udplev`。
+
+接着创建与远程服务器进行通信的socket, 通过 `bufferevent_opnessl_socket_new` 函数建立安全的 ssl 连接，并且传输层是属于安全的tcp连接，前面已经提到了，不管是TCP还是UDP流量，tls-proxy都通过tcp传输出去。
+
+##### `udp_sendreq_cb`
+
+向服务器发送连接申请后，通过该函数进行处理。当连接成功后，发送初始的HTTP请求消息，只是将 "ConnectionType" 改为 "udp".
+
+接着通过 `udp_recvres_cb` 接收服务器的返回消息。
+
+##### `udp_recvres_cb`
+
+用于接收第一次发送请求消息后的服务器返回消息。
+
+当数据到达后，首先读取第一行的 statusline, 检查正常后，将上面提到的两个事件 `udptev` 和 `udplev` 加入事件队列中，加入后两个事件就开始正常工作后。
+
+同时将 proxy-server 端的bufferevent 的可读回调函数设置为 `udp_response_cb`，当有事件到达时还是唤醒 `udp_sendreq_cb`，用于在出现相关错误事件时关闭udp并释放资源，毕竟tcp还得工作。
+
+##### `udp_request_cb `
+
+前面提到了 `udp_request_cb` 是当本地socket `udplsock` 可读时的回调函数，当其可读时，说明本地程序需要发送请求，tls-proxy则需要从socket管道接收数据，解析出目的地址，并将其发送往 bufferevent.
+
+udp传输发送和接收数据的函数分别是 `sendto` 和 `recvmsg` ，并不是配套的两个函数，可能是为了方便。
+
+`udp_request_cb` 使用 `recvmsg` 从socket管道接收数据，接收到的数据存储在 `struct msghdr` 结构体中。
+
+```c
+struct iovec {                    /* Scatter/gather array items */
+   void  *iov_base;              /* Starting address */
+   size_t iov_len;               /* Number of bytes to transfer */
+};
+
+struct msghdr {
+   void         *msg_name;       /* optional address */
+   socklen_t     msg_namelen;    /* size of address */
+   struct iovec *msg_iov;        /* scatter/gather array */
+   size_t        msg_iovlen;     /* # elements in msg_iov */
+   void         *msg_control;    /* ancillary data, see below */
+   size_t        msg_controllen; /* ancillary data buffer len */
+   int           msg_flags;      /* flags on received message */
+};
+```
+
+其中 `msg_control` 指向一些辅助数据，利用 `CMSG_FIRSTHDR` 宏可以找到目的地址，具体用法可以查看源代码。
+
+接着作者将本地地址、目的地址以及远程端口都变成字符串形式发送给 `udpbev`，远程端口的获得则通过 uthash 实现的一个哈希表，key为本地地址和本地端口组成的 string, value 则为远程端口。
+
+此外，作者还对报文内容进行了 base64 的加密，暂时不确定这么做的理由，应该是为了安全，避免明文发送报文。
+
+注意，发送给 `udpbev` 的内容并非正式的udp报文，而是作者自己定义的格式，在 server 还会再做处理。
+
+##### `udp_response_cb`
+
+该函数用于在
+
