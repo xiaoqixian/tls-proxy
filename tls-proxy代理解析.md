@@ -8,6 +8,8 @@ tls-proxy分为服务端和客户端。服务端的任务是负责转发来自�
 
 另外，tls-proxy 对于客户端与服务器的连接在应用层上其实是建立的 https 的安全连接，其中会涉及到许多 ssl 的知识，如果掺杂在一起讲会显得比较乱，所以我在本篇去除ssl相关的部分讲，将其看成是http的连接，也无大碍。
 
+tls-proxy 将许多TCP连接的过程隐藏到了 bufferevent 中的函数中，所以如果你之前学过socket网络编程，但是只是知道几个函数，而并不知道每个函数对应TCP连接创立的哪些过程的话，推荐你阅读我写的这篇[文章](https://www.cnblogs.com/lunar-ubuntu/articles/12987802.html)。
+
 [TOC]
 
 ### event2 lib
@@ -105,7 +107,7 @@ void tcp_events_cb(struct bufferevent* bev, short events, void* arg)
 
 `short` 类型的events参数表明事件的类型，不看错误处理的部分代码，则只需要关注 `BEV_EVENT_CONNECTED` 事件。
 
-当建立连接之后，客户端需要做的就是发送请求信息建立连接，具体信息就是http报文的请求头。
+当建立连接之后，客户端需要做的就是发送请求信息建立连接，具体信息就是http报文的请求头。注意看，请求头有这么两行："Upgrade: websocket" 和 "Connection: Upgrade"。表示要对当前的HTTP进行升级，升级成 websocket, 如果你没有听说过 websocket, 你应该去了解一下，这是一种兼容HTTP的应用层通信协议，其最大的优势有两个：一个是持久通行，另一个是全双工通信。前一个在HTTP/1.1里面也有，但是后一个在HTTP协议里面没有，HTTP只能在客户端request到达后返回一个response.
 
 发送完请求之后为 `destbev` 可读数据到达时设置的回调函数 `tcp_recvres_cb`，这个函数后面会提到。同时事件到达的处理函数不变。
 
@@ -201,6 +203,8 @@ TCP连接的部分就暂时分析到这里，有问题的话可以在评论去�
 
 ##### `udp_request_cb `
 
+该函数用于接收本地程序的请求，并将其发送给服务器。
+
 前面提到了 `udp_request_cb` 是当本地socket `udplsock` 可读时的回调函数，当其可读时，说明本地程序需要发送请求，tls-proxy则需要从socket管道接收数据，解析出目的地址，并将其发送往 bufferevent.
 
 udp传输发送和接收数据的函数分别是 `sendto` 和 `recvmsg` ，并不是配套的两个函数，可能是为了方便。
@@ -234,5 +238,34 @@ struct msghdr {
 
 ##### `udp_response_cb`
 
-该函数用于在
+该函数用于在接收服务器的返回消息，处理后发送给本地程序。
 
+由于该函数内部涉及到几个地址，
+
+### tls-server
+
+server 还是从 `service` 函数开始看起，对于server来说，不管是tcp连接，还是udp连接，都可以用一个 `evconnlistener_new_bind` 创造的listener 进行监听，回调函数为 `new_accept_cb`.
+
+##### `new_accept_cb`
+
+函数签名为：
+
+```c
+void new_accept_cb(struct evconlistener* listener, int sock, struct sockaddr* addr, int addrlen, void* arg);
+```
+
+其中 `sock` 就是新接受的连接的 socket fd, 根据该 sock 建立一个 bufferevent 进行监听，设置可读的回调函数为 `new_fstreq_cb`，事件的回调函数为 `new_events_cb`.
+
+##### `new_fstreq_cb`
+
+当 bufferevnt 接收到可读数据时，首先读取第一行，找到 "ConnectionType"，确认连接的种类。
+
+如果是接收到 udp 连接，将回复`WEBSOCKET_RESPONSE` 报文，该报文的内容是提示客户端使用websocket协议，websocket在前面已经有所介绍，其也是建立在tcp连接之上的，所以客户端会自动将udp协议转换为tcp协议。
+
+接着将 bev 的可读回调函数设置为 `udp_request_cb`.
+
+如果是接收到 tcp 连接，则需要从报文头部中分析出目的地址和端口，并根据这个地址创建一个 destbev 用于与目的服务器进行通信。
+
+ 这里服务端与目的服务器的通信方式 与 服务端和客户端之间的通信方式的设置是一样的。
+
+接下来的流程大部分都是与客户端的设置是一样的，这里也不作赘述。
